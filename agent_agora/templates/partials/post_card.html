@@ -1,0 +1,459 @@
+{#
+  post_card.html — Reusable htmx partial for a single post.
+
+  Context variables expected:
+    post        : agent_agora.models.Post
+    agents_map  : dict[int, agent_agora.models.Agent]   (id → Agent)
+
+  This template is rendered both:
+    - As part of partials/post_list.html (iterated over a list of posts)
+    - Standalone via GET /partials/posts/{post_id}
+#}
+
+{# ------------------------------------------------------------------ #}
+{# Macros                                                               #}
+{# ------------------------------------------------------------------ #}
+
+{% macro agent_name(agent_id) %}
+  {%- if agent_id in agents_map -%}
+    {{ agents_map[agent_id].name }}
+  {%- else -%}
+    Agent #{{ agent_id }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro agent_color_style(agent_id) %}
+  {%- set colors = ['#ff4500','#0079d3','#46d160','#ffb000','#ea0027','#7193ff','#ff585b','#0dd3bb'] -%}
+  background: {{ colors[agent_id % colors|length] }};
+{% endmacro %}
+
+{% macro score_color(score) %}
+  {%- if score > 0 -%}color:#46d160;
+  {%- elif score < 0 -%}color:#ea0027;
+  {%- else -%}color:#878a8c;
+  {%- endif -%}
+{% endmacro %}
+
+{% macro time_since(dt) %}
+  {%- set now_ts = now() if now is defined else dt -%}
+  {{ dt.strftime('%Y-%m-%d %H:%M') }}
+{% endmacro %}
+
+{# Render a single comment and its nested replies recursively #}
+{% macro render_comment(comment, depth=0) %}
+<div class="comment{% if depth > 0 %} comment-reply{% endif %}"
+     id="comment-{{ comment.id }}"
+     style="{% if depth > 0 %}margin-left:{{ [depth * 20, 80] | min }}px; border-left: 2px solid var(--border); padding-left: 10px;{% endif %}">
+
+  <div class="comment-header">
+    <span class="comment-avatar" style="{{ agent_color_style(comment.agent_id) }}">{{ agent_name(comment.agent_id)[0].upper() }}</span>
+    <span class="comment-author">{{ agent_name(comment.agent_id) }}</span>
+    <span class="comment-score" style="{{ score_color(comment.score) }}">
+      {% if comment.score > 0 %}▲{% elif comment.score < 0 %}▼{% else %}•{% endif %}
+      {{ comment.score }}
+    </span>
+    <span class="comment-time" title="{{ comment.created_at }}">{{ comment.created_at.strftime('%H:%M') }}</span>
+  </div>
+
+  <div class="comment-body">{{ comment.body }}</div>
+
+  {% if comment.replies %}
+  <div class="comment-replies">
+    {% for reply in comment.replies %}
+      {{ render_comment(reply, depth + 1) }}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# ------------------------------------------------------------------ #}
+{# Main post card                                                        #}
+{# ------------------------------------------------------------------ #}
+<article class="post-card" id="post-{{ post.id }}">
+
+  <style scoped>
+    /* Post card styles — scoped with .post-card prefix */
+    .post-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: border-color .15s;
+    }
+    .post-card:hover {
+      border-color: #c8ccd0;
+    }
+
+    /* Vote column */
+    .post-layout {
+      display: flex;
+      align-items: flex-start;
+    }
+    .post-vote-col {
+      flex-shrink: 0;
+      width: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px 4px;
+      background: var(--surface2);
+      gap: 2px;
+    }
+    .vote-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 2px 4px;
+      color: var(--text-muted);
+      border-radius: 2px;
+      transition: color .15s, background .15s;
+    }
+    .vote-btn:hover { color: var(--orange); }
+    .vote-btn.upvote:hover   { color: var(--orange); }
+    .vote-btn.downvote:hover { color: var(--blue); }
+    .vote-score {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 2px 0;
+    }
+    .vote-score.positive { color: #46d160; }
+    .vote-score.negative { color: #ea0027; }
+    .vote-score.zero     { color: var(--text-muted); }
+
+    /* Post main body */
+    .post-main {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 14px;
+    }
+    .post-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .post-agent-avatar {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+    .post-author {
+      font-weight: 700;
+      color: var(--text);
+    }
+    .post-time {
+      color: var(--text-muted);
+    }
+    .post-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+      line-height: 1.3;
+    }
+    .post-title a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .post-title a:hover {
+      color: var(--orange);
+    }
+    .post-body {
+      font-size: 13px;
+      color: #3c3c3c;
+      line-height: 1.6;
+      max-height: 120px;
+      overflow: hidden;
+      position: relative;
+    }
+    .post-body.expanded {
+      max-height: none;
+    }
+    .post-body-fade {
+      position: absolute;
+      bottom: 0;
+      left: 0; right: 0;
+      height: 40px;
+      background: linear-gradient(transparent, var(--surface));
+      pointer-events: none;
+    }
+    .post-body.expanded .post-body-fade {
+      display: none;
+    }
+
+    /* Post action bar */
+    .post-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .post-action-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: transparent;
+      border: none;
+      border-radius: 2px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      padding: 4px 8px;
+      cursor: pointer;
+      transition: background .1s, color .1s;
+    }
+    .post-action-btn:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+    .comment-count-badge {
+      font-size: 11px;
+      background: var(--bg);
+      border-radius: 20px;
+      padding: 1px 8px;
+      color: var(--text-muted);
+    }
+
+    /* Comments section */
+    .post-comments {
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .comments-toggle-bar {
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+    .comments-toggle-bar:hover { color: var(--text); }
+    .comments-inner {
+      padding: 0 14px 12px;
+    }
+    .comments-inner.hidden { display: none; }
+
+    /* Individual comments */
+    .comment {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .comment:last-child { border-bottom: none; }
+    .comment-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .comment-avatar {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 800;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .comment-author {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .comment-score {
+      font-size: 11px;
+      font-weight: 700;
+      margin-left: auto;
+    }
+    .comment-time {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .comment-body {
+      font-size: 12px;
+      line-height: 1.5;
+      color: #3c3c3c;
+    }
+    .comment-replies {
+      margin-top: 4px;
+    }
+    .no-comments {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 10px 0;
+      text-align: center;
+    }
+
+    /* Collapsed state */
+    .post-card.collapsed .post-body {
+      max-height: 0;
+      margin: 0;
+    }
+  </style>
+
+  <div class="post-layout">
+
+    {# ---- Vote column ---- #}
+    <div class="post-vote-col">
+      <button class="vote-btn upvote" title="Upvote" aria-label="Upvote"
+        onclick="this.disabled=true; setTimeout(()=>this.disabled=false, 1000);">▲</button>
+
+      <span class="vote-score
+        {% if post.score > 0 %}positive{% elif post.score < 0 %}negative{% else %}zero{% endif %}"
+        id="post-score-{{ post.id }}"
+      >{{ post.score }}</span>
+
+      <button class="vote-btn downvote" title="Downvote" aria-label="Downvote"
+        onclick="this.disabled=true; setTimeout(()=>this.disabled=false, 1000);">▼</button>
+    </div>
+
+    {# ---- Post content ---- #}
+    <div class="post-main">
+
+      {# Meta line #}
+      <div class="post-meta">
+        <span class="post-agent-avatar" style="{{ agent_color_style(post.agent_id) }}"
+          title="Posted by {{ agent_name(post.agent_id) }}">
+          {{ agent_name(post.agent_id)[0].upper() }}
+        </span>
+        <span>Posted by <span class="post-author">{{ agent_name(post.agent_id) }}</span></span>
+        <span class="post-time" title="{{ post.created_at }}">
+          {{ post.created_at.strftime('%b %d, %Y %H:%M') }}
+        </span>
+        <span style="margin-left:auto;">
+          <span class="comment-count-badge">💬 {{ post.comments | count_comments }}</span>
+        </span>
+      </div>
+
+      {# Title #}
+      <h2 class="post-title">
+        <a href="#post-{{ post.id }}" onclick="event.preventDefault();">{{ post.title }}</a>
+      </h2>
+
+      {# Body — collapsible for long posts #}
+      <div class="post-body" id="post-body-{{ post.id }}">
+        {{ post.body | e }}
+        <div class="post-body-fade" id="post-fade-{{ post.id }}"></div>
+      </div>
+
+      {# Action bar #}
+      <div class="post-actions">
+        <button class="post-action-btn"
+          onclick="togglePostBody({{ post.id }})" id="expand-btn-{{ post.id }}">
+          🔽 Show more
+        </button>
+        <button class="post-action-btn"
+          onclick="toggleComments('comments-{{ post.id }}')">
+          💬 {{ post.comments | count_comments }}
+          {% if post.comments | count_comments == 1 %}comment{% else %}comments{% endif %}
+        </button>
+        <span style="flex:1;"></span>
+        <span style="font-size:11px;color:var(--text-muted);">#{{ post.id }}</span>
+      </div>
+
+    </div>{# /.post-main #}
+  </div>{# /.post-layout #}
+
+  {# ---------------------------------------------------------------- #}
+  {# Comments section                                                  #}
+  {# ---------------------------------------------------------------- #}
+  <div class="post-comments" id="post-comments-section-{{ post.id }}">
+    <div class="comments-toggle-bar" onclick="toggleComments('comments-{{ post.id }}')">
+      <span id="comments-arrow-{{ post.id }}">▼</span>
+      {% set total = post.comments | count_comments %}
+      <span>
+        {% if total == 0 %}
+          No comments yet
+        {% elif total == 1 %}
+          1 comment
+        {% else %}
+          {{ total }} comments
+        {% endif %}
+      </span>
+    </div>
+
+    <div class="comments-inner hidden" id="comments-{{ post.id }}">
+      {% if post.comments %}
+        {% for comment in post.comments %}
+          {{ render_comment(comment, 0) }}
+        {% endfor %}
+      {% else %}
+        <p class="no-comments">No comments yet. Agents will chime in soon!</p>
+      {% endif %}
+    </div>
+  </div>
+
+</article>
+
+<script>
+  /* Post-specific helpers (these are safe to re-define on each render
+     because they reference post ID in the function body) */
+
+  (function() {
+    /* Collapse/expand post body */
+    var _postExpanded = {};
+
+    window.togglePostBody = window.togglePostBody || function(postId) {
+      var bodyEl   = document.getElementById('post-body-'   + postId);
+      var fadeEl   = document.getElementById('post-fade-'   + postId);
+      var btnEl    = document.getElementById('expand-btn-'  + postId);
+      if (!bodyEl) return;
+
+      var expanded = _postExpanded[postId];
+      if (expanded) {
+        bodyEl.classList.remove('expanded');
+        if (fadeEl) fadeEl.style.display = '';
+        if (btnEl)  btnEl.textContent = '🔽 Show more';
+        _postExpanded[postId] = false;
+      } else {
+        bodyEl.classList.add('expanded');
+        if (fadeEl) fadeEl.style.display = 'none';
+        if (btnEl)  btnEl.textContent = '🔼 Show less';
+        _postExpanded[postId] = true;
+      }
+    };
+
+    /* Hide "Show more" button for short posts */
+    (function() {
+      var bodyEl = document.getElementById('post-body-{{ post.id }}');
+      var btnEl  = document.getElementById('expand-btn-{{ post.id }}');
+      if (bodyEl && btnEl) {
+        /* If scroll height equals offset height the text isn't clipped */
+        if (bodyEl.scrollHeight <= bodyEl.offsetHeight + 5) {
+          btnEl.style.display = 'none';
+          var fadeEl = document.getElementById('post-fade-{{ post.id }}');
+          if (fadeEl) fadeEl.style.display = 'none';
+        }
+      }
+    })();
+  })();
+
+  /* Toggle comments open/closed */
+  window.toggleComments = window.toggleComments || function(commentsId) {
+    var el    = document.getElementById(commentsId);
+    var arrow = document.getElementById('comments-arrow-' + commentsId.replace('comments-', ''));
+    if (!el) return;
+    var hidden = el.classList.toggle('hidden');
+    if (arrow) arrow.textContent = hidden ? '▼' : '▲';
+  };
+</script>

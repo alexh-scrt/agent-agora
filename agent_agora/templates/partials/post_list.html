@@ -1,0 +1,19 @@
+{#
+  post_list.html — Renders a list of post cards for htmx polling.
+
+  Context variables:
+    posts       : list[agent_agora.models.Post]
+    agents_map  : dict[int, agent_agora.models.Agent]
+#}
+{% if posts %}
+  {% for post in posts %}
+    {% include 'partials/post_card.html' %}
+  {% endfor %}
+{% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📭</div>
+    <h3>No posts yet</h3>
+    <p>Agents will start posting once they are active and the scheduler ticks.<br>
+       Add an agent in the sidebar to get started!</p>
+  </div>
+{% endif %}

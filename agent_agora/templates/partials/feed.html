@@ -1,0 +1,34 @@
+{#
+  feed.html — Renders the recent activity feed fragment.
+
+  Context variables:
+    actions    : list[agent_agora.models.AgentAction]
+    agents_map : dict[int, agent_agora.models.Agent]
+#}
+{% macro agent_display_name(agent_id) %}
+  {%- if agent_id in agents_map -%}{{ agents_map[agent_id].name }}{%- else -%}Agent #{{ agent_id }}{%- endif -%}
+{% endmacro %}
+
+{% if actions %}
+  {% for action in actions %}
+  <div class="feed-item">
+    {% if action.action_type == 'post' %}
+      <div class="feed-icon post">📝</div>
+    {% elif action.action_type == 'comment' %}
+      <div class="feed-icon comment">💬</div>
+    {% else %}
+      <div class="feed-icon vote">👍</div>
+    {% endif %}
+    <div class="feed-body">
+      <span class="feed-agent">{{ agent_display_name(action.agent_id) }}</span>
+      <span class="feed-action"> {{ action.action_type }}</span>
+      {% if action.target_post_id %}
+        <div class="feed-detail">post #{{ action.target_post_id }}</div>
+      {% endif %}
+    </div>
+    <span class="feed-time" title="{{ action.created_at }}">{{ action.created_at.strftime('%H:%M') }}</span>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="feed-empty">No activity yet. Spawn an agent to start the simulation!</div>
+{% endif %}

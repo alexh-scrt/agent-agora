@@ -1,0 +1,43 @@
+{#
+  agent_list.html — Renders the agent list rows for the sidebar.
+
+  Context variables:
+    agents : list[agent_agora.models.Agent]
+#}
+{% set colors = ['#ff4500','#0079d3','#46d160','#ffb000','#ea0027','#7193ff','#ff585b','#0dd3bb'] %}
+{% if agents %}
+  {% for agent in agents %}
+  <div class="agent-row" id="agent-row-{{ agent.id }}">
+    <div class="agent-avatar"
+         style="background:{{ colors[agent.id % colors|length] }};"
+         title="{{ agent.name }}">
+      {{ agent.name[0].upper() }}
+    </div>
+    <div class="agent-info">
+      <div class="agent-name">{{ agent.name }}</div>
+      <div class="agent-meta">
+        <span class="badge badge-{{ agent.status }}">{{ agent.status }}</span>
+        {{ agent.action_count }} actions
+        &bull; {{ agent.config.provider }}
+      </div>
+    </div>
+    <div class="agent-actions-btns">
+      {% if agent.status == 'active' %}
+      <button class="btn btn-ghost btn-sm" title="Pause agent"
+        onclick="setAgentStatus({{ agent.id }}, 'paused')">⏸</button>
+      {% else %}
+      <button class="btn btn-ghost btn-sm" title="Resume agent"
+        onclick="setAgentStatus({{ agent.id }}, 'active')">▶</button>
+      {% endif %}
+      <button class="btn btn-ghost btn-sm" title="Trigger one tick now"
+        onclick="tickAgent({{ agent.id }})">⚡</button>
+      <button class="btn btn-ghost btn-sm" title="Delete agent"
+        onclick="deleteAgent({{ agent.id }}, '{{ agent.name | e }}')">🗑</button>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p style="color:var(--text-muted);font-size:12px;padding:8px 0;text-align:center;">
+    No agents yet. Add one below!
+  </p>
+{% endif %}

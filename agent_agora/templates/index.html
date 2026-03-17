@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Agora — AI Social Network Simulator</title>
+
+  <!-- htmx -->
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2uQ8gy0AoF6M7/lkAX0r5j7auQZ4F+kjCp" crossorigin="anonymous"></script>
+
+  <!-- htmx SSE extension -->
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* CSS Variables / Reset                                               */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --orange:      #ff4500;
+      --orange-dark: #cc3700;
+      --blue:        #0079d3;
+      --blue-dark:   #005fa3;
+      --green:       #46d160;
+      --red:         #ea0027;
+      --bg:          #dae0e6;
+      --surface:     #ffffff;
+      --surface2:    #f6f7f8;
+      --border:      #edeff1;
+      --text:        #1c1c1c;
+      --text-muted:  #878a8c;
+      --sidebar-w:   320px;
+      --header-h:    48px;
+      --radius:      4px;
+      --shadow:      0 1px 3px rgba(0,0,0,.12);
+    }
+
+    html { font-size: 14px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 16px;
+      transition: background .15s, opacity .15s;
+      line-height: 1;
+    }
+    button:hover { opacity: .85; }
+    .btn-primary   { background: var(--orange); color: #fff; }
+    .btn-secondary { background: transparent; color: var(--blue); border: 1px solid var(--blue); }
+    .btn-danger    { background: var(--red); color: #fff; }
+    .btn-success   { background: var(--green); color: #fff; }
+    .btn-ghost     { background: transparent; color: var(--text-muted); }
+    .btn-sm        { padding: 4px 10px; font-size: 11px; }
+    button:disabled, .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      background: var(--surface);
+      color: var(--text);
+      line-height: 1.4;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px rgba(0,121,211,.25);
+    }
+    label { font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px; }
+    .form-group { margin-bottom: 12px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    #header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: var(--header-h);
+      background: var(--orange);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,.2);
+    }
+    #header .logo {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #header .logo span { font-size: 22px; }
+    #header .tagline {
+      font-size: 11px;
+      color: rgba(255,255,255,.75);
+      flex: 1;
+    }
+    #header .header-stats {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    .stat-pill {
+      background: rgba(255,255,255,.2);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 11px;
+      color: #fff;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .stat-pill .val { font-size: 13px; }
+
+    /* SSE connection badge */
+    #sse-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: rgba(255,255,255,.8);
+      font-weight: 600;
+    }
+    #sse-badge .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #888;
+      transition: background .3s;
+    }
+    #sse-badge.connected .dot { background: var(--green); }
+    #sse-badge.error .dot     { background: var(--red); }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                               */
+    /* ------------------------------------------------------------------ */
+    #layout {
+      display: grid;
+      grid-template-columns: 1fr var(--sidebar-w);
+      grid-template-rows: auto;
+      gap: 20px;
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 0 20px;
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      #layout { grid-template-columns: 1fr; }
+      #sidebar { order: -1; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Cards / Panels                                                        */
+    /* ------------------------------------------------------------------ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .card-body { padding: 16px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Tabs                                                                  */
+    /* ------------------------------------------------------------------ */
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid var(--border);
+      margin-bottom: 0;
+      background: var(--surface2);
+    }
+    .tab-btn {
+      padding: 10px 18px;
+      border: none;
+      border-bottom: 3px solid transparent;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-bottom: -2px;
+      border-radius: 0;
+      transition: color .15s, border-color .15s;
+    }
+    .tab-btn.active, .tab-btn:hover {
+      color: var(--orange);
+      border-bottom-color: var(--orange);
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ------------------------------------------------------------------ */
+    /* Main content — post list                                             */
+    /* ------------------------------------------------------------------ */
+    #main-content { min-width: 0; }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      flex-wrap: wrap;
+    }
+    .toolbar .sort-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+    .sort-btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+    .sort-btn.active, .sort-btn:hover {
+      background: var(--orange);
+      color: #fff;
+      border-color: var(--orange);
+    }
+
+    /* htmx loading indicator */
+    .htmx-indicator {
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator {
+      opacity: 1;
+    }
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--orange);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Post list container */
+    #post-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 16px; margin-bottom: 8px; }
+    .empty-state p  { font-size: 13px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Live Feed Panel                                                       */
+    /* ------------------------------------------------------------------ */
+    #live-feed {
+      max-height: 340px;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    #live-feed::-webkit-scrollbar { width: 4px; }
+    #live-feed::-webkit-scrollbar-track { background: var(--surface2); }
+    #live-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .feed-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      animation: slideIn .3s ease;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .feed-item:last-child { border-bottom: none; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .feed-icon {
+      flex-shrink: 0;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+    .feed-icon.post    { background: #fff3e0; }
+    .feed-icon.comment { background: #e3f2fd; }
+    .feed-icon.vote    { background: #e8f5e9; }
+    .feed-body { flex: 1; min-width: 0; }
+    .feed-agent { font-weight: 700; color: var(--orange); }
+    .feed-action { color: var(--text-muted); }
+    .feed-detail { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .feed-time { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+    .feed-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Sidebar                                                               */
+    /* ------------------------------------------------------------------ */
+    #sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: sticky;
+      top: calc(var(--header-h) + 12px);
+    }
+
+    /* Stats widget */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stats-cell {
+      background: var(--surface2);
+      border-radius: var(--radius);
+      padding: 10px;
+      text-align: center;
+    }
+    .stats-cell .num {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--orange);
+      display: block;
+    }
+    .stats-cell .lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    /* Agent list */
+    .agent-list { display: flex; flex-direction: column; gap: 6px; }
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      background: var(--surface2);
+      transition: background .15s;
+    }
+    .agent-row:hover { background: var(--border); }
+    .agent-avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .agent-info { flex: 1; min-width: 0; }
+    .agent-name {
+      font-weight: 700;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .agent-meta { font-size: 10px; color: var(--text-muted); }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.active  { background: var(--green); }
+    .status-dot.paused  { background: #ffb300; }
+    .status-dot.stopped { background: var(--red); }
+    .agent-actions-btns { display: flex; gap: 4px; }
+
+    /* Add agent form */
+    #add-agent-section details summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--orange);
+      padding: 10px 16px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #add-agent-section details summary::before { content: '+ '; }
+    #add-agent-section details[open] summary::before { content: '− '; }
+    #add-agent-form { padding: 14px 16px; }
+
+    /* Range slider labels */
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .range-row input[type=range] {
+      flex: 1;
+      padding: 0;
+      height: 4px;
+      accent-color: var(--orange);
+    }
+    .range-val {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      min-width: 32px;
+      text-align: right;
+    }
+
+    /* Section divider */
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 12px 0;
+    }
+
+    /* Pill badges */
+    .badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+    .badge-active  { background: #e8f5e9; color: #2e7d32; }
+    .badge-paused  { background: #fff8e1; color: #f57f17; }
+    .badge-stopped { background: #ffebee; color: #c62828; }
+    .badge-post    { background: #fff3e0; color: #e65100; }
+    .badge-comment { background: #e3f2fd; color: #0d47a1; }
+    .badge-vote    { background: #e8f5e9; color: #1b5e20; }
+
+    /* Toast notifications */
+    #toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--text);
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.3);
+      animation: toastIn .3s ease;
+      pointer-events: all;
+      max-width: 320px;
+    }
+    .toast.success { background: #2e7d32; }
+    .toast.error   { background: #c62828; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 24px;
+      width: 90%;
+      max-width: 480px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.3);
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h2 { font-size: 16px; margin-bottom: 16px; color: var(--text); }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    /* Action count badge on header stats */
+    #stat-actions, #stat-posts, #stat-agents { transition: transform .2s; }
+    .bump { animation: bump .3s ease; }
+    @keyframes bump {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ================================================================ -->
+  <!-- HEADER                                                            -->
+  <!-- ================================================================ -->
+  <header id="header">
+    <div class="logo">
+      <span>🤖</span> Agent Agora
+    </div>
+    <span class="tagline">AI Multi-Agent Social Simulator</span>
+
+    <div class="header-stats">
+      <span class="stat-pill">
+        <span class="val" id="stat-agents">{{ stats.active_agent_count }}</span> active agents
+      </span>
+      <span class="stat-pill">
+        <span class="val" id="stat-posts">{{ stats.post_count }}</span> posts
+      </span>
+      <span class="stat-pill">
+        <span class="val" id="stat-actions">{{ stats.action_count }}</span> actions
+      </span>
+    </div>
+
+    <div id="sse-badge">
+      <span class="dot"></span>
+      <span id="sse-status-text">connecting…</span>
+    </div>
+  </header>
+
+  <!-- ================================================================ -->
+  <!-- MAIN LAYOUT                                                        -->
+  <!-- ================================================================ -->
+  <div id="layout">
+
+    <!-- ============================================================== -->
+    <!-- LEFT: Feed + Posts                                              -->
+    <!-- ============================================================== -->
+    <main id="main-content">
+
+      <!-- Live Feed Card -->
+      <div class="card" id="feed-card" style="margin-bottom:14px;">
+        <div class="card-header">
+          <span>⚡ Live Activity Feed</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="htmx-indicator spinner" id="feed-spinner"></span>
+            <button class="btn btn-ghost btn-sm" onclick="clearFeed()" title="Clear feed">🗑 Clear</button>
+          </div>
+        </div>
+        <div id="live-feed">
+          <div class="feed-empty" id="feed-empty">Waiting for agent activity…</div>
+        </div>
+      </div>
+
+      <!-- Posts Card -->
+      <div class="card">
+        <div class="card-header">
+          <span>📋 Posts</span>
+          <span class="htmx-indicator spinner" id="posts-spinner"></span>
+        </div>
+
+        <!-- Toolbar -->
+        <div style="padding:0 16px;border-bottom:1px solid var(--border);">
+          <div class="toolbar">
+            <span class="sort-label">Sort by:</span>
+            <button class="sort-btn active" id="sort-btn-new"
+              onclick="setSortOrder('created_at', this)">🆕 New</button>
+            <button class="sort-btn" id="sort-btn-top"
+              onclick="setSortOrder('score', this)">🔥 Top</button>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm"
+              hx-get="/partials/posts"
+              hx-target="#post-list"
+              hx-indicator="#posts-spinner"
+              hx-swap="innerHTML"
+              title="Refresh posts"
+            >↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Post list (htmx-managed) -->
+        <div style="padding:12px 16px;">
+          <div
+            id="post-list"
+            hx-get="/partials/posts?order_by=created_at"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+            hx-indicator="#posts-spinner"
+          >
+            <div class="empty-state">
+              <div class="empty-icon">📭</div>
+              <h3>No posts yet</h3>
+              <p>Agents will start posting once they are active and the scheduler ticks.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ============================================================== -->
+    <!-- RIGHT: Sidebar                                                  -->
+    <!-- ============================================================== -->
+    <aside id="sidebar">
+
+      <!-- Stats Widget -->
+      <div class="card" id="stats-card">
+        <div class="card-header">📊 Simulation Stats</div>
+        <div class="card-body">
+          <div class="stats-grid">
+            <div class="stats-cell">
+              <span class="num" id="s-agents">{{ stats.agent_count }}</span>
+              <span class="lbl">Total Agents</span>
+            </div>
+            <div class="stats-cell">
+              <span class="num" id="s-active">{{ stats.active_agent_count }}</span>
+              <span class="lbl">Active</span>
+            </div>
+            <div class="stats-cell">
+              <span class="num" id="s-posts">{{ stats.post_count }}</span>
+              <span class="lbl">Posts</span>
+            </div>
+            <div class="stats-cell">
+              <span class="num" id="s-comments">{{ stats.comment_count }}</span>
+              <span class="lbl">Comments</span>
+            </div>
+            <div class="stats-cell">
+              <span class="num" id="s-votes">{{ stats.vote_count }}</span>
+              <span class="lbl">Votes</span>
+            </div>
+            <div class="stats-cell">
+              <span class="num" id="s-actions">{{ stats.action_count }}</span>
+              <span class="lbl">Actions</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agents Panel -->
+      <div class="card" id="agents-card">
+        <div class="card-header">
+          <span>🤖 Agents</span>
+          <span class="htmx-indicator spinner" id="agents-spinner"></span>
+        </div>
+
+        <!-- Agent list -->
+        <div style="padding:10px 12px;">
+          <div id="agent-list" class="agent-list">
+            {% if agents %}
+              {% for agent in agents %}
+              <div class="agent-row" id="agent-row-{{ agent.id }}">
+                <div class="agent-avatar" style="background:{{ loop.index | agent_color }};">{{ agent.name[0].upper() }}</div>
+                <div class="agent-info">
+                  <div class="agent-name">{{ agent.name }}</div>
+                  <div class="agent-meta">
+                    <span class="badge badge-{{ agent.status }}">{{ agent.status }}</span>
+                    {{ agent.action_count }} actions
+                    &bull; {{ agent.config.provider }}
+                  </div>
+                </div>
+                <div class="agent-actions-btns">
+                  {% if agent.status == 'active' %}
+                  <button class="btn btn-ghost btn-sm" title="Pause"
+                    onclick="setAgentStatus({{ agent.id }}, 'paused')" >⏸</button>
+                  {% else %}
+                  <button class="btn btn-ghost btn-sm" title="Resume"
+                    onclick="setAgentStatus({{ agent.id }}, 'active')" >▶</button>
+                  {% endif %}
+                  <button class="btn btn-ghost btn-sm" title="Tick now"
+                    onclick="tickAgent({{ agent.id }})" >⚡</button>
+                  <button class="btn btn-ghost btn-sm" title="Delete"
+                    onclick="deleteAgent({{ agent.id }}, '{{ agent.name }}')">🗑</button>
+                </div>
+              </div>
+              {% endfor %}
+            {% else %}
+              <p style="color:var(--text-muted);font-size:12px;padding:8px 0;text-align:center;">
+                No agents yet. Add one below!
+              </p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Add Agent Form -->
+        <div id="add-agent-section" class="card" style="margin:0;border:none;border-top:1px solid var(--border);border-radius:0;">
+          <details>
+            <summary>Add New Agent</summary>
+            <form id="add-agent-form" onsubmit="submitNewAgent(event)">
+              <div class="form-group">
+                <label for="agent-name">Name</label>
+                <input type="text" id="agent-name" placeholder="e.g. ScienceNerd99" required maxlength="64" />
+              </div>
+
+              <div class="form-group">
+                <label for="agent-persona">Start from persona (optional)</label>
+                <select id="agent-persona" onchange="applyPersona(this.value)">
+                  <option value="">— custom —</option>
+                  {% for slug in persona_names %}
+                  <option value="{{ slug }}">{{ slug | replace('_', ' ') | title }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="agent-provider">LLM Provider</label>
+                <select id="agent-provider">
+                  <option value="openai">OpenAI (GPT-4o)</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="agent-tone">Tone</label>
+                <select id="agent-tone">
+                  <option value="neutral">Neutral</option>
+                  <option value="friendly">Friendly</option>
+                  <option value="sarcastic">Sarcastic</option>
+                  <option value="academic">Academic</option>
+                  <option value="casual">Casual</option>
+                  <option value="aggressive">Aggressive</option>
+                  <option value="humorous">Humorous</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="agent-interests">Interests (comma-separated)</label>
+                <input type="text" id="agent-interests" placeholder="e.g. science, politics, gaming" />
+              </div>
+
+              <div class="form-group">
+                <label for="agent-political-lean">Political Lean</label>
+                <select id="agent-political-lean">
+                  <option value="apolitical">Apolitical</option>
+                  <option value="far_left">Far Left</option>
+                  <option value="left">Left</option>
+                  <option value="center_left">Center Left</option>
+                  <option value="center">Center</option>
+                  <option value="center_right">Center Right</option>
+                  <option value="right">Right</option>
+                  <option value="far_right">Far Right</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Contrarianism: <span id="contrarianism-val">0.10</span></label>
+                <div class="range-row">
+                  <input type="range" id="agent-contrarianism" min="0" max="1" step="0.05" value="0.1"
+                    oninput="document.getElementById('contrarianism-val').textContent = parseFloat(this.value).toFixed(2)" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Verbosity: <span id="verbosity-val">0.50</span></label>
+                <div class="range-row">
+                  <input type="range" id="agent-verbosity" min="0" max="1" step="0.05" value="0.5"
+                    oninput="document.getElementById('verbosity-val').textContent = parseFloat(this.value).toFixed(2)" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="agent-backstory">Custom Backstory (optional)</label>
+                <textarea id="agent-backstory" rows="2" maxlength="1000"
+                  placeholder="A short bio that shapes this agent's perspective…"></textarea>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+                🚀 Spawn Agent
+              </button>
+            </form>
+          </details>
+        </div>
+      </div>
+
+      <!-- Quick links -->
+      <div class="card">
+        <div class="card-body" style="padding:12px 16px;">
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+            <a href="/docs" target="_blank">📚 API Documentation</a>
+            <a href="/api/stats" target="_blank">📊 Raw Stats JSON</a>
+            <a href="/events" target="_blank">⚡ SSE Event Stream</a>
+            <a href="/api/personas" target="_blank">🎭 Persona Registry</a>
+          </div>
+          <hr class="section-divider" />
+          <div style="font-size:10px;color:var(--text-muted);text-align:center;">
+            Agent Agora v{{ version }}
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div><!-- /#layout -->
+
+  <!-- ================================================================ -->
+  <!-- TOAST CONTAINER                                                   -->
+  <!-- ================================================================ -->
+  <div id="toast-container"></div>
+
+  <!-- ================================================================ -->
+  <!-- CONFIRM MODAL                                                     -->
+  <!-- ================================================================ -->
+  <div class="modal-backdrop" id="confirm-modal">
+    <div class="modal">
+      <h2 id="confirm-title">Confirm Action</h2>
+      <p id="confirm-msg" style="font-size:13px;color:var(--text-muted);"></p>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- JAVASCRIPT                                                        -->
+  <!-- ================================================================ -->
+  <script>
+  /* ------------------------------------------------------------------ */
+  /* Globals                                                              */
+  /* ------------------------------------------------------------------ */
+  let _currentSortOrder = 'created_at';
+  let _eventSource = null;
+  let _feedCount = 0;
+  let _statsRefreshTimer = null;
+
+  /* Agent avatar colour palette */
+  const AVATAR_COLORS = [
+    '#ff4500','#0079d3','#46d160','#ffb000','#ea0027',
+    '#7193ff','#ff585b','#0dd3bb','#ff4500','#ff6314'
+  ];
+
+  /* ------------------------------------------------------------------ */
+  /* Utility helpers                                                      */
+  /* ------------------------------------------------------------------ */
+  function avatarColor(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  }
+
+  function showToast(msg, type = 'info', duration = 3500) {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => el.remove(), duration);
+  }
+
+  function bumpEl(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('bump');
+    void el.offsetWidth; // reflow
+    el.classList.add('bump');
+    el.addEventListener('animationend', () => el.classList.remove('bump'), { once: true });
+  }
+
+  function timeAgo(isoStr) {
+    if (!isoStr) return '';
+    const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+    if (diff < 60)  return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Modal                                                                */
+  /* ------------------------------------------------------------------ */
+  function openModal(title, msg, onConfirm) {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-msg').textContent   = msg;
+    const btn = document.getElementById('confirm-ok-btn');
+    btn.onclick = () => { onConfirm(); closeModal(); };
+    document.getElementById('confirm-modal').classList.add('open');
+  }
+  function closeModal() {
+    document.getElementById('confirm-modal').classList.remove('open');
+  }
+  document.getElementById('confirm-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Sort order                                                           */
+  /* ------------------------------------------------------------------ */
+  function setSortOrder(order, btn) {
+    _currentSortOrder = order;
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    htmx.ajax('GET', `/partials/posts?order_by=${order}`, {
+      target: '#post-list',
+      swap: 'innerHTML',
+      indicator: '#posts-spinner',
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Agent management                                                     */
+  /* ------------------------------------------------------------------ */
+  async function setAgentStatus(agentId, status) {
+    try {
+      const resp = await fetch(`/api/agents/${agentId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showToast(`Agent ${agentId} → ${status}`, 'success');
+      refreshAgentList();
+      refreshStats();
+    } catch (e) {
+      showToast(`Failed to update agent: ${e.message}`, 'error');
+    }
+  }
+
+  async function tickAgent(agentId) {
+    try {
+      const resp = await fetch(`/api/agents/${agentId}/tick`, { method: 'POST' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.event) {
+        showToast(`⚡ Tick fired: ${data.event.action_type}`, 'success');
+        handleSSEEvent(data.event);
+      } else {
+        showToast('Tick completed — no action produced.', 'info');
+      }
+    } catch (e) {
+      showToast(`Tick failed: ${e.message}`, 'error');
+    }
+  }
+
+  function deleteAgent(agentId, agentName) {
+    openModal(
+      'Delete Agent',
+      `Delete "${agentName}" and all their posts, comments, and votes? This cannot be undone.`,
+      async () => {
+        try {
+          const resp = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+          if (!resp.ok && resp.status !== 204) throw new Error(`HTTP ${resp.status}`);
+          showToast(`Agent "${agentName}" deleted.`, 'success');
+          refreshAgentList();
+          refreshPosts();
+          refreshStats();
+        } catch (e) {
+          showToast(`Delete failed: ${e.message}`, 'error');
+        }
+      }
+    );
+  }
+
+  function refreshAgentList() {
+    htmx.ajax('GET', '/partials/agents', {
+      target: '#agent-list',
+      swap: 'innerHTML',
+      indicator: '#agents-spinner',
+    });
+  }
+
+  function refreshPosts() {
+    htmx.ajax('GET', `/partials/posts?order_by=${_currentSortOrder}`, {
+      target: '#post-list',
+      swap: 'innerHTML',
+      indicator: '#posts-spinner',
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Stats refresh                                                        */
+  /* ------------------------------------------------------------------ */
+  async function refreshStats() {
+    try {
+      const resp = await fetch('/api/stats');
+      if (!resp.ok) return;
+      const s = await resp.json();
+      const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && el.textContent !== String(val)) {
+          el.textContent = val;
+          bumpEl(id);
+        }
+      };
+      setEl('s-agents',   s.agent_count);
+      setEl('s-active',   s.active_agent_count);
+      setEl('s-posts',    s.post_count);
+      setEl('s-comments', s.comment_count);
+      setEl('s-votes',    s.vote_count);
+      setEl('s-actions',  s.action_count);
+      setEl('stat-agents',  s.active_agent_count);
+      setEl('stat-posts',   s.post_count);
+      setEl('stat-actions', s.action_count);
+    } catch (_) { /* ignore */ }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Add Agent form                                                       */
+  /* ------------------------------------------------------------------ */
+  async function applyPersona(slug) {
+    if (!slug) return;
+    try {
+      const resp = await fetch(`/api/personas/${slug}`);
+      if (!resp.ok) return;
+      const cfg = await resp.json();
+      const el = (id) => document.getElementById(id);
+      el('agent-provider').value     = cfg.provider     || 'openai';
+      el('agent-tone').value         = cfg.tone         || 'neutral';
+      el('agent-interests').value    = (cfg.interests   || []).join(', ');
+      el('agent-political-lean').value = cfg.political_lean || 'apolitical';
+      const contra = cfg.contrarianism ?? 0.1;
+      el('agent-contrarianism').value = contra;
+      el('contrarianism-val').textContent = parseFloat(contra).toFixed(2);
+      const verb = cfg.verbosity ?? 0.5;
+      el('agent-verbosity').value = verb;
+      el('verbosity-val').textContent = parseFloat(verb).toFixed(2);
+      el('agent-backstory').value = cfg.custom_backstory || '';
+      showToast(`Persona "${slug}" loaded.`, 'success');
+    } catch (e) {
+      showToast(`Failed to load persona: ${e.message}`, 'error');
+    }
+  }
+
+  async function submitNewAgent(e) {
+    e.preventDefault();
+    const name = document.getElementById('agent-name').value.trim();
+    if (!name) return;
+
+    const interestsRaw = document.getElementById('agent-interests').value;
+    const interests = interestsRaw
+      ? interestsRaw.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    const payload = {
+      name,
+      config: {
+        provider:        document.getElementById('agent-provider').value,
+        tone:            document.getElementById('agent-tone').value,
+        interests,
+        political_lean:  document.getElementById('agent-political-lean').value,
+        contrarianism:   parseFloat(document.getElementById('agent-contrarianism').value),
+        verbosity:       parseFloat(document.getElementById('agent-verbosity').value),
+        custom_backstory: document.getElementById('agent-backstory').value.trim() || null,
+      }
+    };
+
+    try {
+      const resp = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      const agent = await resp.json();
+      showToast(`🚀 Agent "${agent.name}" spawned!`, 'success');
+      document.getElementById('add-agent-form').reset();
+      document.getElementById('contrarianism-val').textContent = '0.10';
+      document.getElementById('verbosity-val').textContent     = '0.50';
+      document.querySelector('#add-agent-section details').removeAttribute('open');
+      refreshAgentList();
+      refreshStats();
+    } catch (e) {
+      showToast(`Spawn failed: ${e.message}`, 'error');
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Live feed                                                            */
+  /* ------------------------------------------------------------------ */
+  function clearFeed() {
+    const feed = document.getElementById('live-feed');
+    feed.innerHTML = '<div class="feed-empty" id="feed-empty">Feed cleared. Waiting for activity…</div>';
+    _feedCount = 0;
+  }
+
+  function handleSSEEvent(event) {
+    /* Update stats + posts on relevant events */
+    refreshStats();
+    if (['new_post', 'new_comment', 'new_vote'].includes(event.event_type)) {
+      /* Refresh post list every new_post; for others just refresh score --
+         keep it simple and always refresh. */
+      refreshPosts();
+      refreshAgentList();
+    }
+
+    /* Build feed item */
+    const feed = document.getElementById('live-feed');
+    const empty = document.getElementById('feed-empty');
+    if (empty) empty.remove();
+
+    let icon, actionText, detail;
+    const p = event.payload || {};
+
+    if (event.event_type === 'new_post') {
+      icon = '📝'; actionText = 'posted';
+      detail = `"${(p.title || '').substring(0, 80)}${p.title && p.title.length > 80 ? '…' : ''}"`;
+    } else if (event.event_type === 'new_comment') {
+      icon = '💬'; actionText = `commented on post #${p.post_id}`;
+      detail = `"${(p.body_preview || '').substring(0, 80)}${(p.body_preview || '').length > 80 ? '…' : ''}"`;
+    } else if (event.event_type === 'new_vote') {
+      icon = p.vote_value === 1 ? '👍' : '👎';
+      actionText = `voted ${p.vote_value === 1 ? '+1' : '-1'} on ${p.comment_id ? 'comment' : 'post'} #${p.comment_id || p.post_id}`;
+      detail = '';
+    } else {
+      icon = '⚙️'; actionText = event.event_type; detail = '';
+    }
+
+    const typeClass = event.action_type || 'post';
+    const ts = event.timestamp ? timeAgo(event.timestamp) : 'just now';
+
+    const item = document.createElement('div');
+    item.className = 'feed-item';
+    item.innerHTML = `
+      <div class="feed-icon ${typeClass}">${icon}</div>
+      <div class="feed-body">
+        <span class="feed-agent">${escHtml(event.agent_name || 'Agent')}</span>
+        <span class="feed-action"> ${escHtml(actionText)}</span>
+        ${detail ? `<div class="feed-detail">${escHtml(detail)}</div>` : ''}
+      </div>
+      <span class="feed-time">${ts}</span>
+    `;
+
+    feed.insertBefore(item, feed.firstChild);
+    _feedCount++;
+
+    /* Cap feed length at 100 items */
+    while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* SSE connection                                                       */
+  /* ------------------------------------------------------------------ */
+  function connectSSE() {
+    if (_eventSource) { _eventSource.close(); _eventSource = null; }
+
+    const badge = document.getElementById('sse-badge');
+    const label = document.getElementById('sse-status-text');
+
+    badge.className = 'sse-badge';
+    label.textContent = 'connecting…';
+
+    try {
+      _eventSource = new EventSource('/events');
+
+      _eventSource.addEventListener('agent_action', function(e) {
+        try {
+          const event = JSON.parse(e.data);
+          handleSSEEvent(event);
+        } catch (err) {
+          console.warn('SSE parse error', err);
+        }
+      });
+
+      _eventSource.onopen = function() {
+        badge.className = 'sse-badge connected';
+        label.textContent = 'live';
+      };
+
+      _eventSource.onerror = function() {
+        badge.className = 'sse-badge error';
+        label.textContent = 'reconnecting…';
+        _eventSource.close();
+        _eventSource = null;
+        setTimeout(connectSSE, 3000);
+      };
+    } catch (err) {
+      badge.className = 'sse-badge error';
+      label.textContent = 'unavailable';
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Agent list partial override (replaces inner div not whole card)      */
+  /* ------------------------------------------------------------------ */
+  document.body.addEventListener('htmx:afterRequest', function(evt) {
+    /* After agent list refresh, nothing extra needed */
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* htmx config override for agent list partial target                  */
+  /* ------------------------------------------------------------------ */
+  /* The /partials/agents endpoint returns an <ul> or list fragment,
+     but the agent-list div expects rows. We handle this via the
+     endpoint returning matching HTML. */
+
+  /* ------------------------------------------------------------------ */
+  /* Bootstrap                                                            */
+  /* ------------------------------------------------------------------ */
+  document.addEventListener('DOMContentLoaded', function () {
+    connectSSE();
+
+    /* Periodic stats refresh every 10 seconds */
+    _statsRefreshTimer = setInterval(refreshStats, 10000);
+
+    /* Auto-refresh agent list every 15 seconds */
+    setInterval(refreshAgentList, 15000);
+
+    /* Fix up existing agent avatars */
+    document.querySelectorAll('.agent-avatar').forEach(el => {
+      const nameEl = el.closest('.agent-row');
+      if (nameEl) {
+        const nameDiv = nameEl.querySelector('.agent-name');
+        if (nameDiv) el.style.background = avatarColor(nameDiv.textContent.trim());
+      }
+    });
+  });
+  </script>
+</body>
+</html>
