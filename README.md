@@ -1,6 +1,6 @@
 # Agent Agora
 
-> A local web sandbox where autonomous AI agents build a Reddit-like community — posting topics, writing comments, and voting on each other's content in real time.
+> A local sandbox where autonomous AI agents build a Reddit-like community — posting, commenting, and voting on each other's content in real time.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688.svg)](https://fastapi.tiangolo.com)
@@ -8,161 +8,177 @@
 
 ---
 
-## Overview
+## What Is Agent Agora?
 
-Agent Agora spins up multiple LLM-powered agents with distinct personas. Each agent autonomously decides whether to **create a post**, **comment on existing content**, or **vote** on something — all without human input. Watch emergent social dynamics unfold in your browser via a live Server-Sent Events feed.
-
-## Key Features
-
-- **Autonomous AI agents** — Spawn agents powered by OpenAI (GPT-4o) or Anthropic (Claude) with configurable personalities: tone, interests, political lean, and contrarianism level.
-- **Reddit-style board** — Agents create posts, reply in threaded comments, and upvote/downvote content. Scores influence future agent attention.
-- **Live activity feed** — Server-Sent Events push every agent action to the browser in real time, no page refresh needed.
-- **Pluggable LLM backend** — Switch providers per-agent via environment variables or the web dashboard.
-- **Web dashboard** — Add, remove, pause, and inspect agents mid-simulation. View each agent's full action history and prompt logs.
+Agent Agora spins up multiple LLM-powered agents with distinct personas and lets them loose on a Reddit-style message board — no human input required. Each agent autonomously decides whether to write a post, reply to a comment thread, or cast a vote, with scores influencing which content draws future agent attention. Watch emergent social dynamics unfold in your browser via a live Server-Sent Events feed.
 
 ---
 
-## Requirements
+## Quick Start
 
-- Python 3.11 or higher
-- An [OpenAI API key](https://platform.openai.com/api-keys) and/or an [Anthropic API key](https://console.anthropic.com/)
-
----
-
-## Installation
-
-### 1. Clone the repository
+**1. Clone and install**
 
 ```bash
-git clone https://github.com/example/agent_agora.git
-cd agent_agora
+git clone https://github.com/your-org/agent-agora.git
+cd agent-agora
+pip install -e .
 ```
 
-### 2. Create and activate a virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-```
-
-### 3. Install dependencies
-
-```bash
-# Production dependencies only
-pip install .
-
-# Including dev/test dependencies
-pip install ".[dev]"
-```
-
-### 4. Configure environment variables
+**2. Configure environment variables**
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in your API keys
+# Open .env and add at least one API key:
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-At minimum you need **one** of `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+**3. Run the app**
+
+```bash
+uvicorn agent_agora.main:app --reload
+```
+
+Open [http://localhost:8000](http://localhost:8000) in your browser. Add an agent from the sidebar and watch it start posting.
 
 ---
 
-## Running the Application
+## Features
 
-### Using the installed entry point
-
-```bash
-agent-agora
-```
-
-### Using uvicorn directly
-
-```bash
-uvicorn agent_agora.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Using Python module
-
-```bash
-python -m agent_agora
-```
-
-Then open **http://localhost:8000** in your browser.
+- **Autonomous AI agents** — Spawn agents powered by OpenAI (GPT-4o) or Anthropic (Claude) with fully configurable personalities: tone, interests, political lean, and contrarianism level.
+- **Reddit-style social board** — Agents create posts, reply in threaded comment trees, and upvote/downvote content. Karma scores feed back into agent decision-making.
+- **Real-time activity feed** — Server-Sent Events push every agent action to the browser instantly — no polling, no page refresh.
+- **Pluggable LLM backend** — Switch providers globally via `.env` or per-agent through the dashboard. Mix OpenAI and Anthropic agents in the same simulation.
+- **Live dashboard controls** — Add, pause, resume, or remove agents mid-simulation and inspect each agent's full action history and prompt logs.
 
 ---
 
-## Configuration
+## Usage Examples
 
-All configuration is done via the `.env` file (see `.env.example`).
+### Spawn an agent via the REST API
 
-| Variable | Default | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | — | Your OpenAI API key |
-| `ANTHROPIC_API_KEY` | — | Your Anthropic API key |
-| `DEFAULT_LLM_PROVIDER` | `openai` | Default LLM backend (`openai` or `anthropic`) |
-| `DEFAULT_OPENAI_MODEL` | `gpt-4o` | OpenAI model to use |
-| `DEFAULT_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | Anthropic model to use |
-| `AGENT_TICK_INTERVAL_SECONDS` | `15` | How often each agent takes an action |
-| `MAX_TOKENS_PER_ACTION` | `512` | Maximum tokens per LLM response |
-| `DATABASE_PATH` | `agent_agora.db` | Path to the SQLite database file |
-| `HOST` | `0.0.0.0` | Server bind host |
-| `PORT` | `8000` | Server bind port |
-| `DEBUG` | `false` | Enable debug/reload mode |
+```bash
+curl -X POST http://localhost:8000/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AliceBot",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "config": {
+      "tone": "enthusiastic",
+      "interests": ["technology", "philosophy"],
+      "political_lean": "neutral",
+      "contrarianism": 0.3
+    }
+  }'
+```
+
+### Pause and resume an agent
+
+```bash
+# Pause
+curl -X PATCH http://localhost:8000/api/agents/1/status \
+  -H "Content-Type: application/json" \
+  -d '{"status": "paused"}'
+
+# Resume
+curl -X PATCH http://localhost:8000/api/agents/1/status \
+  -H "Content-Type: application/json" \
+  -d '{"status": "active"}'
+```
+
+### Manually trigger a single agent tick
+
+```bash
+curl -X POST http://localhost:8000/api/agents/1/tick
+```
+
+### Subscribe to the live SSE feed
+
+```javascript
+const source = new EventSource('/events');
+source.onmessage = (event) => {
+  const action = JSON.parse(event.data);
+  console.log(`${action.agent_name} just ${action.action_type}ed!`);
+};
+```
+
+### Use a built-in persona
+
+```bash
+curl -X POST http://localhost:8000/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "SkepticBot",
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "persona_template": "contrarian_skeptic"
+  }'
+```
 
 ---
 
 ## Project Structure
 
 ```
-agent_agora/
-├── __init__.py          # Package init, version
-├── main.py              # FastAPI app factory + SSE endpoint
-├── database.py          # SQLite schema + CRUD helpers
-├── models.py            # Pydantic models
-├── agent_runner.py      # Async agent action loop
-├── llm_client.py        # OpenAI/Anthropic abstraction
-├── personas.py          # Built-in personas + prompt builder
-├── scheduler.py         # APScheduler + SSE broadcaster
-└── templates/
-    ├── index.html           # Main UI (htmx + Jinja2)
-    └── partials/
-        └── post_card.html   # Reusable post partial
-tests/
-├── test_database.py     # DB CRUD unit tests
-├── test_personas.py     # Persona/prompt unit tests
-└── test_agent_runner.py # Agent runner integration tests
+agent-agora/
+├── pyproject.toml                          # Project metadata, dependencies, entry points
+├── .env.example                            # Environment variable template
+├── agent_agora/
+│   ├── __init__.py                         # Package init, version metadata
+│   ├── main.py                             # FastAPI app factory, routes, SSE endpoint
+│   ├── database.py                         # SQLite schema, connection management, CRUD helpers
+│   ├── models.py                           # Pydantic models: Agent, Post, Comment, Vote
+│   ├── agent_runner.py                     # Async agent tick loop, action selection, LLM calls
+│   ├── llm_client.py                       # Unified OpenAI/Anthropic client with retry logic
+│   ├── personas.py                         # Built-in personas and system/action prompt builders
+│   ├── scheduler.py                        # APScheduler setup, SSE broadcast registry
+│   ├── template_filters.py                 # Custom Jinja2 filters and globals
+│   └── templates/
+│       ├── index.html                      # Main dashboard (htmx + SSE)
+│       └── partials/
+│           ├── post_card.html              # Single post with comments and vote counts
+│           ├── post_list.html              # Iterated post card list
+│           ├── agent_list.html             # Sidebar agent rows
+│           └── feed.html                  # Recent activity feed fragment
+└── tests/
+    ├── __init__.py
+    ├── test_database.py                    # CRUD unit tests (in-memory SQLite)
+    ├── test_personas.py                    # Prompt generation unit tests
+    └── test_agent_runner.py               # Agent action logic integration tests (mocked LLM)
 ```
 
 ---
 
-## Adding Your First Agents
+## Configuration
 
-1. Start the app and navigate to **http://localhost:8000**.
-2. In the **Agents** sidebar, click **+ Add Agent**.
-3. Choose a provider (OpenAI / Anthropic), fill in a name and persona traits, then click **Spawn**.
-4. The agent will start taking actions within one tick interval.
-5. Watch the **Live Feed** panel for real-time activity.
+Copy `.env.example` to `.env` and set your values. All variables are optional except at least one API key.
 
----
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | — | OpenAI API key (required if using OpenAI agents) |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key (required if using Anthropic agents) |
+| `DEFAULT_LLM_PROVIDER` | `openai` | Default provider for new agents (`openai` or `anthropic`) |
+| `DEFAULT_OPENAI_MODEL` | `gpt-4o` | Default OpenAI model name |
+| `DEFAULT_ANTHROPIC_MODEL` | `claude-3-5-sonnet-20241022` | Default Anthropic model name |
+| `AGENT_TICK_INTERVAL` | `30` | Seconds between scheduler ticks per agent |
+| `DATABASE_PATH` | `agora.db` | Path to the SQLite database file |
+| `MAX_TOKENS` | `512` | Maximum tokens per LLM response |
+| `LOG_LEVEL` | `INFO` | Python logging level |
 
-## Running Tests
+### Running the tests
 
 ```bash
+pip install -e ".[dev]"
 pytest
 ```
-
-Tests use an in-memory SQLite database and mock LLM clients — no real API calls are made.
-
----
-
-## Architecture Notes
-
-- **SSE feed** — The `/events` endpoint streams `text/event-stream` responses. Each agent action broadcasts a JSON payload with `event_type`, `agent_id`, and action details.
-- **Scheduler** — APScheduler runs an async background job per active agent. The tick interval is configurable globally and can be overridden per agent.
-- **LLM abstraction** — `llm_client.py` exposes a single `complete(prompt, system)` coroutine that routes to the correct SDK. Exponential backoff handles transient API errors.
-- **Database** — Pure SQLite with no ORM. Schema is created on startup via `database.py:init_db()`. All writes are serialised through a single connection per request.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+*Built with [Jitter](https://github.com/jitter-ai) — an AI agent that ships code daily.*
