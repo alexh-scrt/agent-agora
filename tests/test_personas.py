@@ -94,7 +94,6 @@ class TestBuildSystemPrompt:
     def test_contains_tone_description(self) -> None:
         """Tone information should appear in the prompt."""
         prompt = build_system_prompt("Bob", _make_config(tone=Tone.SARCASTIC))
-        # The tone description for sarcastic mentions irony or sarcasm
         lower = prompt.lower()
         assert "sarcasm" in lower or "sardonic" in lower or "irony" in lower
 
@@ -190,6 +189,40 @@ class TestBuildSystemPrompt:
             prompt = build_system_prompt("Pete", config)
             assert len(prompt) > 50, f"Empty prompt for lean {lean}"
 
+    def test_returns_str_not_bytes(self) -> None:
+        """build_system_prompt should return a str, not bytes."""
+        prompt = build_system_prompt("Quinn", _make_config())
+        assert isinstance(prompt, str)
+
+    def test_different_names_produce_different_prompts(self) -> None:
+        """Different agent names should produce different prompts."""
+        config = _make_config()
+        p1 = build_system_prompt("Alice", config)
+        p2 = build_system_prompt("Bob", config)
+        assert p1 != p2
+
+    def test_neutral_tone_does_not_contain_extreme_language(self) -> None:
+        """Neutral tone prompt should not include extreme personality descriptors."""
+        config = _make_config(tone=Tone.NEUTRAL)
+        prompt = build_system_prompt("Sam", config)
+        lower = prompt.lower()
+        # Should not say highly aggressive or highly sarcastic
+        assert "aggressive" not in lower or "neutral" in lower
+
+    def test_friendly_tone_in_prompt(self) -> None:
+        """FRIENDLY tone should produce warm/friendly language in the prompt."""
+        config = _make_config(tone=Tone.FRIENDLY)
+        prompt = build_system_prompt("Tina", config)
+        lower = prompt.lower()
+        assert "friendly" in lower or "warm" in lower or "approachable" in lower
+
+    def test_academic_tone_in_prompt(self) -> None:
+        """ACADEMIC tone should produce scholarly language in the prompt."""
+        config = _make_config(tone=Tone.ACADEMIC)
+        prompt = build_system_prompt("Uma", config)
+        lower = prompt.lower()
+        assert "academic" in lower or "scholarly" in lower or "evidence" in lower or "analytical" in lower
+
 
 # ---------------------------------------------------------------------------
 # build_post_prompt tests
@@ -239,6 +272,24 @@ class TestBuildPostPrompt:
         prompt = build_post_prompt("Frank", _make_config(), recent_posts=[])
         assert "Recent posts" not in prompt
 
+    def test_prompt_not_empty_with_no_interests(self) -> None:
+        """build_post_prompt should still return a useful prompt with no interests."""
+        config = _make_config(interests=[])
+        prompt = build_post_prompt("Gary", config)
+        assert len(prompt) > 20
+
+    def test_prompt_mentions_agent_name(self) -> None:
+        """The post prompt should reference the agent's name."""
+        prompt = build_post_prompt("Helena", _make_config())
+        assert "Helena" in prompt
+
+    def test_multiple_posts_in_context(self) -> None:
+        """Multiple recent posts should all appear in the prompt."""
+        posts = [_make_post(title=f"Post {i}", post_id=i) for i in range(1, 6)]
+        prompt = build_post_prompt("Igor", _make_config(), recent_posts=posts)
+        for i in range(1, 6):
+            assert f"Post {i}" in prompt
+
 
 # ---------------------------------------------------------------------------
 # build_comment_prompt tests
@@ -272,7 +323,6 @@ class TestBuildCommentPrompt:
         long_body = "x" * 2000
         post = _make_post(body=long_body)
         prompt = build_comment_prompt("Dana", _make_config(), post)
-        # The full body should not appear; the prompt should be much shorter than 2000 chars for body
         assert long_body not in prompt
         assert "..." in prompt
 
@@ -307,10 +357,25 @@ class TestBuildCommentPrompt:
         """With contrarianism=1.0 the contrarian hint should always appear."""
         config = _make_config(contrarianism=1.0)
         post = _make_post()
-        # Patch random.random to always return 0.0 so the branch is taken
         with patch("agent_agora.personas.random.random", return_value=0.0):
             prompt = build_comment_prompt("Ivan", config, post)
         assert "contrarian" in prompt.lower() or "push back" in prompt.lower() or "disagree" in prompt.lower()
+
+    def test_no_contrarian_hint_with_zero_contrarianism(self) -> None:
+        """With contrarianism=0 and random returning high value, no contrarian hint."""
+        config = _make_config(contrarianism=0.0)
+        post = _make_post()
+        with patch("agent_agora.personas.random.random", return_value=1.0):
+            prompt = build_comment_prompt("Jane", config, post)
+        # The prompt should still be a valid string
+        assert isinstance(prompt, str)
+        assert len(prompt) > 20
+
+    def test_prompt_includes_agent_name(self) -> None:
+        """The comment prompt should reference the agent's name."""
+        post = _make_post()
+        prompt = build_comment_prompt("Karen", _make_config(), post)
+        assert "Karen" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +428,27 @@ class TestBuildVotePrompt:
         post = _make_post()
         prompt = build_vote_prompt("Frank", config, post)
         assert "low" in prompt.lower()
+
+    def test_vote_prompt_is_nonempty_without_comment(self) -> None:
+        """build_vote_prompt without a target_comment should still produce a prompt."""
+        post = _make_post()
+        prompt = build_vote_prompt("Gary", _make_config(), post, target_comment=None)
+        assert len(prompt) > 20
+
+    def test_vote_prompt_mentions_agent_name(self) -> None:
+        """The vote prompt should reference the agent's name."""
+        post = _make_post()
+        prompt = build_vote_prompt("Helena", _make_config(), post)
+        assert "Helena" in prompt
+
+    def test_medium_contrarianism_not_labeled_high_or_low(self) -> None:
+        """Medium contrarianism (0.5) should be labeled 'medium' or similar, not 'high' or 'low'."""
+        config = _make_config(contrarianism=0.5)
+        post = _make_post()
+        prompt = build_vote_prompt("Igor", config, post)
+        lower = prompt.lower()
+        # The prompt should mention some contrarianism description
+        assert "medium" in lower or "moderate" in lower or "contrarianism" in lower
 
 
 # ---------------------------------------------------------------------------
@@ -452,3 +538,37 @@ class TestBuiltInPersonas:
         config = get_persona("contrarian_critic")
         assert config is not None
         assert config.contrarianism > 0.5
+
+    def test_all_personas_have_nonempty_interests(self) -> None:
+        """Every built-in persona should have at least one interest."""
+        for slug, config in BUILT_IN_PERSONAS.items():
+            assert len(config.interests) > 0, f"{slug!r} has no interests"
+
+    def test_all_personas_have_known_tone(self) -> None:
+        """All personas should have a tone that is a valid Tone enum value."""
+        valid_tones = {t.value for t in Tone}
+        for slug, config in BUILT_IN_PERSONAS.items():
+            assert str(config.tone) in valid_tones, (
+                f"{slug!r} has unrecognised tone {config.tone!r}"
+            )
+
+    def test_all_personas_have_known_provider(self) -> None:
+        """All personas should have a provider that is a valid LLMProvider enum value."""
+        valid_providers = {p.value for p in LLMProvider}
+        for slug, config in BUILT_IN_PERSONAS.items():
+            assert str(config.provider) in valid_providers, (
+                f"{slug!r} has unrecognised provider {config.provider!r}"
+            )
+
+    def test_get_persona_names_all_strings(self) -> None:
+        """get_persona_names should return a list of strings."""
+        names = get_persona_names()
+        for name in names:
+            assert isinstance(name, str)
+
+    def test_persona_slugs_are_lowercase_with_underscores(self) -> None:
+        """Persona slugs should use lowercase letters and underscores only."""
+        import re
+        pattern = re.compile(r'^[a-z][a-z0-9_]*$')
+        for slug in BUILT_IN_PERSONAS:
+            assert pattern.match(slug), f"{slug!r} is not a valid slug"

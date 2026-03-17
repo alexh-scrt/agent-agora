@@ -121,7 +121,6 @@ class TestParseJsonResponse:
 
     def test_json_array_returns_none(self) -> None:
         """A JSON array (not object) should return None."""
-        # The helper looks for { ... } so an array won't be found as a dict
         result = _parse_json_response('["a", "b"]')
         assert result is None
 
@@ -135,6 +134,32 @@ class TestParseJsonResponse:
         """An empty string should return None."""
         result = _parse_json_response("")
         assert result is None
+
+    def test_nested_json_object(self) -> None:
+        """A nested JSON object should be parsed correctly."""
+        result = _parse_json_response('{"outer": {"inner": 42}}')
+        assert result == {"outer": {"inner": 42}}
+
+    def test_json_with_unicode(self) -> None:
+        """JSON containing unicode characters should parse correctly."""
+        result = _parse_json_response('{"body": "Hello \u4e16\u754c"}')
+        assert result is not None
+        assert "\u4e16\u754c" in result["body"]
+
+    def test_json_with_escaped_quotes(self) -> None:
+        """JSON with escaped quotes inside strings should parse correctly."""
+        result = _parse_json_response('{"title": "He said \'hello\'"}')
+        # Single quotes aren't valid JSON; should fail or succeed depending on content
+        # Test with properly escaped double quotes
+        result2 = _parse_json_response('{"title": "He said \\"hello\\""}')
+        assert result2 is not None
+
+    def test_multiline_json(self) -> None:
+        """Multi-line JSON should be parsed correctly."""
+        text = '{\n  "title": "Multi\\nline",\n  "body": "Body text"\n}'
+        result = _parse_json_response(text)
+        assert result is not None
+        assert result["title"] == "Multi\nline"
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +226,16 @@ class TestSelectAction:
         counts = {ActionType.POST: 0, ActionType.COMMENT: 0, ActionType.VOTE: 0}
         for _ in range(400):
             counts[_select_action(config)] += 1
-        # Both should be between 150 and 250 out of 400 trials
         assert 150 <= counts[ActionType.POST] <= 250
         assert 150 <= counts[ActionType.COMMENT] <= 250
         assert counts[ActionType.VOTE] == 0
+
+    def test_select_action_with_default_config(self) -> None:
+        """Default AgentConfig should produce valid action selections."""
+        config = AgentConfig()
+        for _ in range(10):
+            action = _select_action(config)
+            assert action in (ActionType.POST, ActionType.COMMENT, ActionType.VOTE)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +317,59 @@ class TestDoPost:
         post, _, _ = result
         assert len(post.title) <= 300
 
+    @pytest.mark.asyncio
+    async def test_body_truncated_to_10000_chars(self, agent: db.Agent, mock_llm: MagicMock) -> None:
+        """Bodies longer than 10000 characters should be truncated."""
+        long_body = "B" * 15000
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "Test", "body": long_body})
+        )
+        result = await _do_post(agent, mock_llm)
+        assert result is not None
+        post, _, _ = result
+        assert len(post.body) <= 10000
+
+    @pytest.mark.asyncio
+    async def test_response_text_returned(self, agent: db.Agent, mock_llm: MagicMock) -> None:
+        """The raw LLM response text should be returned in the tuple."""
+        raw = json.dumps({"title": "Hello", "body": "World"})
+        mock_llm.complete = AsyncMock(return_value=raw)
+        result = await _do_post(agent, mock_llm)
+        assert result is not None
+        _, _, response_text = result
+        assert response_text == raw
+
+    @pytest.mark.asyncio
+    async def test_post_persisted_to_db(self, agent: db.Agent, mock_llm: MagicMock) -> None:
+        """The created post should be retrievable from the database."""
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "DB Test", "body": "Stored body."})
+        )
+        result = await _do_post(agent, mock_llm)
+        assert result is not None
+        post, _, _ = result
+        fetched = db.get_post(post.id)
+        assert fetched is not None
+        assert fetched.title == "DB Test"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_empty_title(self, agent: db.Agent, mock_llm: MagicMock) -> None:
+        """A response with an empty title string should return None."""
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "", "body": "Body text here."})
+        )
+        result = await _do_post(agent, mock_llm)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_empty_body(self, agent: db.Agent, mock_llm: MagicMock) -> None:
+        """A response with an empty body string should return None."""
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "Has title", "body": ""})
+        )
+        result = await _do_post(agent, mock_llm)
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # _do_comment tests
@@ -310,7 +394,6 @@ class TestDoComment:
         post = db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
         mock_llm.complete = AsyncMock(return_value=json.dumps({"body": "Interesting take!"}))
 
-        # Force top-level comment (no reply) by patching random
         with patch("agent_agora.agent_runner.random.random", return_value=0.9):
             result = await _do_comment(agent, mock_llm)
 
@@ -332,7 +415,6 @@ class TestDoComment:
         )
         mock_llm.complete = AsyncMock(return_value=json.dumps({"body": "I agree!"}))
 
-        # Force reply path
         with patch("agent_agora.agent_runner.random.random", return_value=0.1):
             result = await _do_comment(agent, mock_llm)
 
@@ -361,6 +443,49 @@ class TestDoComment:
         result = await _do_comment(agent, mock_llm)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_returns_none_on_missing_body(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """A JSON response missing the 'body' key should return None."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"title": "no body key"}))
+        result = await _do_comment(agent, mock_llm)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_comment_persisted_to_db(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """The created comment should be retrievable from the database."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"body": "Persisted comment"}))
+
+        with patch("agent_agora.agent_runner.random.random", return_value=0.9):
+            result = await _do_comment(agent, mock_llm)
+
+        assert result is not None
+        comment, _, _, _ = result
+        fetched = db.get_comment(comment.id)
+        assert fetched is not None
+        assert fetched.body == "Persisted comment"
+
+    @pytest.mark.asyncio
+    async def test_comment_body_truncated(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """Comment bodies exceeding 5000 characters should be truncated."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
+        long_body = "C" * 8000
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"body": long_body}))
+
+        with patch("agent_agora.agent_runner.random.random", return_value=0.9):
+            result = await _do_comment(agent, mock_llm)
+
+        assert result is not None
+        comment, _, _, _ = result
+        assert len(comment.body) <= 5000
+
 
 # ---------------------------------------------------------------------------
 # _do_vote tests
@@ -385,7 +510,6 @@ class TestDoVote:
         post = db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
         mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": 1}))
 
-        # Force post vote (not comment vote)
         with patch("agent_agora.agent_runner.random.random", return_value=0.9):
             result = await _do_vote(agent, mock_llm)
 
@@ -428,7 +552,6 @@ class TestDoVote:
         )
         mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": 1}))
 
-        # Force comment vote path
         with patch("agent_agora.agent_runner.random.random", return_value=0.1):
             result = await _do_vote(agent, mock_llm)
 
@@ -470,6 +593,41 @@ class TestDoVote:
         mock_llm.complete = AsyncMock(side_effect=LLMError("rate limited"))
         result = await _do_vote(agent, mock_llm)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_vote_zero(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """A vote value of 0 should return None (only 1 and -1 are valid)."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": 0}))
+        result = await _do_vote(agent, mock_llm)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_non_numeric_vote(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """A non-numeric vote value should return None."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Test", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": "upvote"}))
+        result = await _do_vote(agent, mock_llm)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_vote_result_includes_post(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """The result tuple should include the target post."""
+        post = db.create_post(PostCreate(agent_id=agent.id, title="Target Post", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": 1}))
+
+        with patch("agent_agora.agent_runner.random.random", return_value=0.9):
+            result = await _do_vote(agent, mock_llm)
+
+        assert result is not None
+        _, _, target_post, _, _ = result
+        assert target_post.id == post.id
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +754,6 @@ class TestRunAgentTick:
         self, agent: db.Agent, mock_llm: MagicMock
     ) -> None:
         """When the action handler returns None the tick should return None."""
-        # No posts exist, so comment action will find nothing to comment on
         mock_llm.complete = AsyncMock(return_value=json.dumps({"body": "No posts!"}))
 
         with patch("agent_agora.agent_runner._select_action", return_value=ActionType.COMMENT), \
@@ -635,5 +792,71 @@ class TestRunAgentTick:
             await run_agent_tick(agent.id, llm_client=mock_llm)
 
         mock_factory.assert_not_called()
-        # Provided client should NOT be closed by the runner
         mock_llm.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sse_event_payload_contains_body_preview(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """The new_post SSE event payload should include a body_preview field."""
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "Preview Test", "body": "Short body."})
+        )
+
+        with patch("agent_agora.agent_runner._select_action", return_value=ActionType.POST), \
+             patch("agent_agora.agent_runner.create_llm_client", return_value=mock_llm):
+            event = await run_agent_tick(agent.id)
+
+        assert event is not None
+        assert "body_preview" in event.payload
+
+    @pytest.mark.asyncio
+    async def test_sse_event_action_type_matches(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """The action_type in the SSE event should match the selected action."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Post", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"vote": -1}))
+
+        with patch("agent_agora.agent_runner._select_action", return_value=ActionType.VOTE), \
+             patch("agent_agora.agent_runner.create_llm_client", return_value=mock_llm), \
+             patch("agent_agora.agent_runner.random.random", return_value=0.9):
+            event = await run_agent_tick(agent.id)
+
+        assert event is not None
+        assert event.action_type == ActionType.VOTE
+
+    @pytest.mark.asyncio
+    async def test_multiple_ticks_increment_count(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """Running multiple ticks should accumulate action_count correctly."""
+        mock_llm.complete = AsyncMock(
+            return_value=json.dumps({"title": "Multi tick", "body": "Body."})
+        )
+
+        for i in range(3):
+            with patch("agent_agora.agent_runner._select_action", return_value=ActionType.POST), \
+                 patch("agent_agora.agent_runner.create_llm_client", return_value=mock_llm):
+                await run_agent_tick(agent.id)
+
+        updated = db.get_agent(agent.id)
+        assert updated is not None
+        assert updated.action_count == 3
+
+    @pytest.mark.asyncio
+    async def test_comment_sse_event_has_post_title(
+        self, agent: db.Agent, mock_llm: MagicMock
+    ) -> None:
+        """The new_comment SSE event should include the post_title field."""
+        db.create_post(PostCreate(agent_id=agent.id, title="Famous Post", body="Body"))
+        mock_llm.complete = AsyncMock(return_value=json.dumps({"body": "Nice!"}))
+
+        with patch("agent_agora.agent_runner._select_action", return_value=ActionType.COMMENT), \
+             patch("agent_agora.agent_runner.create_llm_client", return_value=mock_llm), \
+             patch("agent_agora.agent_runner.random.random", return_value=0.9):
+            event = await run_agent_tick(agent.id)
+
+        assert event is not None
+        assert "post_title" in event.payload
+        assert event.payload["post_title"] == "Famous Post"
